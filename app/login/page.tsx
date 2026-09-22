@@ -1,0 +1,1 @@
+"use client";import {Auth} from "../../components/jarvis";export default function Login(){return <Auth/>}
