@@ -94,7 +94,12 @@ export default function AIGuru(){
         live+=t;
         if(e.results[i].isFinal)finalText+=t;
       }
-      if(finalText.trim()){setMsg(finalText.trim());voiceCommand(finalText.trim())}
+      if(finalText.trim()){
+  const q=finalText.trim();
+  setMsg(q);
+  const commandLike=/^(jarvis[\s,]*)?(add|create|put|save|log|mark|complete|finish|remove|delete|move|set|update|schedule)\b/i.test(q);
+  if(commandLike) voiceCommand(q); else ask(q,true);
+}
       else if(live)setMsg(live);
     };
     r.onerror=()=>{setListening(false);setVoiceStatus("Could not hear that. Tap the mic and try again.")};
