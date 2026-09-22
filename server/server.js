@@ -150,15 +150,17 @@ app.post("/api/backlog",auth,async(req,res)=>{
 });
 
 async function buildContext(userId){
-  const [u,l,b,p,m,c]=await Promise.all([
+  const [u,l,b,p,m,c,t,e]=await Promise.all([
     pool.query("select name,target_exam,target_year,daily_target_hours from users where id=$1",[userId]),
     pool.query("select log_date,study_minutes,questions,correct,notes from study_logs where user_id=$1 order by log_date desc,created_at desc limit 20",[userId]),
     pool.query("select subject,topic,priority,status,due_date,notes from backlog where user_id=$1 and status<>'DONE' order by case priority when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end limit 30",[userId]),
     pool.query("select plan_date,subject,topic,start_time,end_time,task,completed from daily_plans where user_id=$1 order by plan_date desc limit 20",[userId]),
     pool.query("select memory_type,content,importance from mentor_memory where user_id=$1 order by importance desc,created_at desc limit 20",[userId]),
-    pool.query("select role,content from chat_messages where user_id=$1 order by created_at desc limit 12",[userId])
+    pool.query("select role,content from chat_messages where user_id=$1 order by created_at desc limit 12",[userId]),
+    pool.query("select title,subject,time,done from mission_tasks where user_id=$1 order by done,created_at desc limit 20",[userId]),
+    pool.query("select subject,chapter,error_type,question,attempt,correct,resolved,next_review from error_book where user_id=$1 order by resolved,next_review nulls last,created_at desc limit 30",[userId])
   ]);
-  return JSON.stringify({profile:u.rows[0],recentStudy:l.rows,backlog:b.rows,plans:p.rows,memory:m.rows,recentChat:c.rows.reverse()});
+  return JSON.stringify({profile:u.rows[0],recentStudy:l.rows,backlog:b.rows,plans:p.rows,memory:m.rows,recentChat:c.rows.reverse(),todos:t.rows,errors:e.rows});
 }
 
 app.patch("/api/backlog/:id",auth,async(req,res)=>{const {status,priority}=req.body||{};const r=await pool.query("update backlog set status=coalesce($1,status),priority=coalesce($2,priority) where id=$3 and user_id=$4 returning *",[status||null,priority||null,req.params.id,req.user.id]);if(!r.rowCount)return res.status(404).json({error:"Backlog item not found"});res.json(r.rows[0]);});
@@ -170,6 +172,43 @@ app.get("/api/errors",auth,async(req,res)=>{const r=await pool.query("select * f
 app.post("/api/errors",auth,async(req,res)=>{const {subject,chapter="",error_type="Conceptual Gap",question="",attempt="",correct=""}=req.body||{};const r=await pool.query("insert into error_book(user_id,subject,chapter,error_type,question,attempt,correct,next_review) values($1,$2,$3,$4,$5,$6,$7,current_date+1) returning *",[req.user.id,subject,chapter,error_type,question,attempt,correct]);res.json(r.rows[0]);});
 app.patch("/api/errors/:id",auth,async(req,res)=>{const r=await pool.query("update error_book set resolved=coalesce($1,resolved),next_review=coalesce($2,next_review) where id=$3 and user_id=$4 returning *",[req.body.resolved??null,req.body.next_review||null,req.params.id,req.user.id]);res.json(r.rows[0]||null);});
 
+app.post("/api/ai/command",auth,async(req,res)=>{
+  const command=String(req.body?.command||"").trim();
+  if(!command) return res.status(400).json({error:"Voice command is required"});
+  if(!openai) return res.status(503).json({error:"AI is not configured yet. Add OPENAI_API_KEY in Render."});
+  try{
+    const context=await buildContext(req.user.id);
+    const response=await openai.responses.create({
+      model:process.env.OPENAI_MODEL||"gpt-5-mini",
+      instructions:"You are the action brain of JARVISFORME. Convert a student natural-language command into exactly one JSON object and nothing else. Allowed actions: add_todo {title,subject,time}; add_backlog {subject,topic,priority,notes}; log_error {subject,chapter,error_type,question,attempt,correct}; complete_todo {id}; complete_backlog {id}; answer {message}. Use ids only when clearly present in the supplied context. Never invent ids. For vague requests, use answer and explain what is missing. Never delete data. Understand English and Hinglish. Normalize subject to Physics, Chemistry, Mathematics, or General. Priority must be LOW, MEDIUM, or HIGH.",
+      input:"STUDENT CONTEXT:\n"+context+"\n\nVOICE COMMAND:\n"+command
+    });
+    const raw=response.output_text||"{}";
+    const action=JSON.parse(raw.trim().replace(/^json\s*/i,"").replace(/^\s*{/, "{"));
+    if(action.action==="add_todo"){
+      const r=await pool.query("insert into mission_tasks(user_id,title,subject,time) values($1,$2,$3,$4) returning *",[req.user.id,action.title,action.subject||"General",action.time||""]);
+      return res.json({action:"add_todo",item:r.rows[0],message:"Done. Added "+r.rows[0].title+" to your Todo."});
+    }
+    if(action.action==="add_backlog"){
+      const r=await pool.query("insert into backlog(user_id,subject,topic,priority,notes) values($1,$2,$3,$4,$5) returning *",[req.user.id,action.subject||"General",action.topic,action.priority||"MEDIUM",action.notes||""]);
+      return res.json({action:"add_backlog",item:r.rows[0],message:"Done. Added "+r.rows[0].subject+" · "+r.rows[0].topic+" to Backlog 360."});
+    }
+    if(action.action==="log_error"){
+      const r=await pool.query("insert into error_book(user_id,subject,chapter,error_type,question,attempt,correct,next_review) values($1,$2,$3,$4,$5,$6,$7,current_date+1) returning *",[req.user.id,action.subject||"General",action.chapter||"",action.error_type||"Conceptual Gap",action.question||"",action.attempt||"",action.correct||""]);
+      return res.json({action:"log_error",item:r.rows[0],message:"Saved. I put that mistake into your Error Book and scheduled the first review."});
+    }
+    if(action.action==="complete_todo"){
+      const r=await pool.query("update mission_tasks set done=true where id=$1 and user_id=$2 returning *",[action.id,req.user.id]);
+      return res.json({action:"complete_todo",item:r.rows[0]||null,message:r.rowCount?"Marked that Todo complete.":"I could not find that Todo."});
+    }
+    if(action.action==="complete_backlog"){
+      const r=await pool.query("update backlog set status='DONE' where id=$1 and user_id=$2 returning *",[action.id,req.user.id]);
+      return res.json({action:"complete_backlog",item:r.rows[0]||null,message:r.rowCount?"Marked that backlog item complete.":"I could not find that backlog item."});
+    }
+    return res.json({action:"answer",message:action.message||"I understood the command, but I need a little more detail."});
+  }catch(e){res.status(500).json({error:"Voice command failed",detail:e.message});}
+});
+
 app.post("/api/ai/chat",auth,async(req,res)=>{
   const message=String(req.body?.message||"").trim();
   if(!message) return res.status(400).json({error:"Message is required"});
@@ -179,7 +218,7 @@ app.post("/api/ai/chat",auth,async(req,res)=>{
   try{
     const response=await openai.responses.create({
       model:process.env.OPENAI_MODEL||"gpt-5-mini",
-      instructions:"You are JARVISFORME, a direct but supportive JEE Main + Advanced study mentor. Use the student's actual data. Never invent progress. Give practical next actions. If asked for a plan, make it realistic and time-blocked. Keep answers concise unless a lesson is requested. You can understand Hinglish.",
+      instructions:"You are JARVISFORME, the student's personal JEE Main + Advanced AI tutor and study operating system. Use the student's actual PostgreSQL data before making claims; never invent progress, scores, deadlines, or completed work. Adapt difficulty to the student's mistakes and backlog. Teach with first-principles explanations, intuitive analogies, formulas, worked examples, exam traps, and a short check question when the student is learning. For doubts, identify the concept, explain it clearly, solve step-by-step, and finish with a compact JEE takeaway. For planning, prioritize urgent backlog, repeated Error Book mistakes, weak practice signals, and realistic available time. For motivation, be direct and practical rather than generic. Understand Hindi/Hinglish and reply naturally in the user's language. Do not claim you changed Todo, Backlog, or Error Book unless an action endpoint actually changed the database.",
       input:"STUDENT CONTEXT:\n"+context+"\n\nSTUDENT MESSAGE:\n"+message
     });
     const answer=response.output_text||"I couldn't generate a response.";
