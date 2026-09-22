@@ -152,3 +152,4 @@ export default function AIGuru(){
       </main>
     </div>
   </Gate>
+}
