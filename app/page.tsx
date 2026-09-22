@@ -1,1 +1,1 @@
-"use client";import {useEffect} from "react";export default function Home(){useEffect(()=>{location.href=localStorage.getItem("jarvis_token")?"/dashboard":"/login"},[]);return <div className="loading">Opening JARVIS…</div>}
+"use client";import {useEffect} from "react";export default function Home(){useEffect(()=>{location.href=localStorage.getItem("jarvis_token")?"/ai-guru":"/login"},[]);return <div className="loading">Opening JARVIS…</div>}
