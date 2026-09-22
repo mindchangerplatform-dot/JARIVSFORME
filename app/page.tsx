@@ -18,7 +18,15 @@ export default function Home(){
  async function log(){try{await req("/api/study/log",{method:"POST",body:JSON.stringify({minutes:30})});await refresh();speak("Thirty minutes logged. Keep going.")}catch(e:any){setErr(e.message)}}
  async function send(text?:string){const q=(text===undefined?msg:text).trim();if(!q||busy)return;setMsg("");setBusy(true);try{const x=await req("/api/ai/chat",{method:"POST",body:JSON.stringify({message:q})});setAnswer(x.answer);speak(x.answer);await refresh()}catch(e:any){setErr(e.message)}finally{setBusy(false)}}
  async function makePlan(){setPlanBusy(true);try{await req("/api/ai/plan",{method:"POST",body:"{}"});await refresh();speak("Your study plan is ready.")}catch(e:any){setErr(e.message)}finally{setPlanBusy(false)}}
- function speak(text:string){if(typeof window==="undefined"||!window.speechSynthesis)return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text.slice(0,1800));u.rate=.98;window.speechSynthesis.speak(u)}
+ async function speak(text:string){
+  if(typeof window==="undefined")return;
+  try{
+    const t=localStorage.getItem("jarvis_token");
+    const r=await fetch(API+"/api/voice/speak",{method:"POST",headers:{"Content-Type":"application/json",...(t?{Authorization:"Bearer "+t}:{})},body:JSON.stringify({text})});
+    if(r.ok){const blob=await r.blob();const audio=new Audio(URL.createObjectURL(blob));await audio.play();return}
+  }catch{}
+  if(window.speechSynthesis){window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text.slice(0,1800));u.rate=.98;window.speechSynthesis.speak(u)}
+}
  function voice(){const SR=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!SR){setErr("Voice input needs Chrome.");return}if(listening){rec.current?.stop();return}const r=new SR();rec.current=r;r.lang="en-IN";r.interimResults=false;r.continuous=false;r.onstart=()=>setListening(true);r.onend=()=>setListening(false);r.onerror=()=>{setListening(false);setErr("Mic permission or recognition failed.")};r.onresult=(e:any)=>{const t=e.results[0][0].transcript;if(/log (30|thirty) (minutes?|mins?)/i.test(t))log();else send(t)};r.start()}
  if(!token)return <Auth reg={reg} setReg={setReg} email={email} setEmail={setEmail} password={password} setPassword={setPassword} name={name} setName={setName} err={err} auth={auth}/>;
  return <main className="app"><aside className="sidebar"><Brand/><nav>{["Dashboard","AI Mentor","Study Planner","Backlog","Practice","Tests","Error Book","Analytics"].map((x,i)=><button className={i===0?"nav active":"nav"} key={x}>{x}</button>)}</nav><div className="mentor-card"><span className="pulse"/><div><b>JARVIS online</b><small>Voice + AI ready</small></div></div><button className="logout" onClick={()=>{localStorage.removeItem("jarvis_token");location.reload()}}>Log out</button></aside>
