@@ -184,7 +184,7 @@ app.post("/api/ai/command",auth,async(req,res)=>{
       input:"STUDENT CONTEXT:\n"+context+"\n\nVOICE COMMAND:\n"+command
     });
     const raw=response.output_text||"{}";
-    const action=JSON.parse(raw.trim().replace(/^json\s*/i,"").replace(/^\s*{/, "{"));
+    const action=JSON.parse(raw.replace(new RegExp(String.fromCharCode(96)+"{3}json","gi"),"").replace(new RegExp(String.fromCharCode(96)+"{3}","g"),"").trim());
     if(action.action==="add_todo"){
       const r=await pool.query("insert into mission_tasks(user_id,title,subject,time) values($1,$2,$3,$4) returning *",[req.user.id,action.title,action.subject||"General",action.time||""]);
       return res.json({action:"add_todo",item:r.rows[0],message:"Done. Added "+r.rows[0].title+" to your Todo."});
