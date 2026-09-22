@@ -69,6 +69,8 @@ async function initDb(){
       importance int not null default 3,
       created_at timestamptz not null default now()
     );
+    create table if not exists mission_tasks(id uuid primary key default gen_random_uuid(),user_id uuid not null references users(id) on delete cascade,title text not null,subject text default 'General',time text,done boolean not null default false,created_at timestamptz not null default now());
+    create table if not exists error_book(id uuid primary key default gen_random_uuid(),user_id uuid not null references users(id) on delete cascade,subject text not null,chapter text,error_type text,question text,attempt text,correct text,resolved boolean not null default false,next_review date,created_at timestamptz not null default now());
     create table if not exists chat_messages(
       id uuid primary key default gen_random_uuid(),
       user_id uuid not null references users(id) on delete cascade,
@@ -158,6 +160,15 @@ async function buildContext(userId){
   ]);
   return JSON.stringify({profile:u.rows[0],recentStudy:l.rows,backlog:b.rows,plans:p.rows,memory:m.rows,recentChat:c.rows.reverse()});
 }
+
+app.patch("/api/backlog/:id",auth,async(req,res)=>{const {status,priority}=req.body||{};const r=await pool.query("update backlog set status=coalesce($1,status),priority=coalesce($2,priority) where id=$3 and user_id=$4 returning *",[status||null,priority||null,req.params.id,req.user.id]);if(!r.rowCount)return res.status(404).json({error:"Backlog item not found"});res.json(r.rows[0]);});
+app.get("/api/missions",auth,async(req,res)=>{const r=await pool.query("select * from mission_tasks where user_id=$1 order by done,created_at desc",[req.user.id]);res.json(r.rows);});
+app.post("/api/missions",auth,async(req,res)=>{const {title,subject="General",time=""}=req.body||{};if(!title)return res.status(400).json({error:"Title required"});const r=await pool.query("insert into mission_tasks(user_id,title,subject,time) values($1,$2,$3,$4) returning *",[req.user.id,title,subject,time]);res.json(r.rows[0]);});
+app.patch("/api/missions/:id",auth,async(req,res)=>{const r=await pool.query("update mission_tasks set done=$1 where id=$2 and user_id=$3 returning *",[!!req.body.done,req.params.id,req.user.id]);res.json(r.rows[0]||null);});
+app.delete("/api/missions/:id",auth,async(req,res)=>{await pool.query("delete from mission_tasks where id=$1 and user_id=$2",[req.params.id,req.user.id]);res.json({ok:true});});
+app.get("/api/errors",auth,async(req,res)=>{const r=await pool.query("select * from error_book where user_id=$1 order by resolved,next_review nulls last,created_at desc",[req.user.id]);res.json(r.rows);});
+app.post("/api/errors",auth,async(req,res)=>{const {subject,chapter="",error_type="Conceptual Gap",question="",attempt="",correct=""}=req.body||{};const r=await pool.query("insert into error_book(user_id,subject,chapter,error_type,question,attempt,correct,next_review) values($1,$2,$3,$4,$5,$6,$7,current_date+1) returning *",[req.user.id,subject,chapter,error_type,question,attempt,correct]);res.json(r.rows[0]);});
+app.patch("/api/errors/:id",auth,async(req,res)=>{const r=await pool.query("update error_book set resolved=coalesce($1,resolved),next_review=coalesce($2,next_review) where id=$3 and user_id=$4 returning *",[req.body.resolved??null,req.body.next_review||null,req.params.id,req.user.id]);res.json(r.rows[0]||null);});
 
 app.post("/api/ai/chat",auth,async(req,res)=>{
   const message=String(req.body?.message||"").trim();
