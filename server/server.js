@@ -193,6 +193,22 @@ app.post("/api/ai/plan",auth,async(req,res)=>{
   }catch{res.status(500).json({error:"AI returned invalid plan data"});}
 });
 
+app.post("/api/voice/speak",auth,async(req,res)=>{
+  const text=String(req.body?.text||"").trim();
+  if(!text) return res.status(400).json({error:"Text required"});
+  if(!process.env.ELEVENLABS_API_KEY||!process.env.ELEVENLABS_VOICE_ID) return res.status(503).json({error:"ElevenLabs is not configured; browser voice remains available."});
+  try{
+    const r=await fetch("https://api.elevenlabs.io/v1/text-to-speech/"+encodeURIComponent(process.env.ELEVENLABS_VOICE_ID),{
+      method:"POST",
+      headers:{"xi-api-key":process.env.ELEVENLABS_API_KEY,"Content-Type":"application/json","Accept":"audio/mpeg"},
+      body:JSON.stringify({text:text.slice(0,3000),model_id:process.env.ELEVENLABS_MODEL_ID||"eleven_multilingual_v2"})
+    });
+    if(!r.ok) return res.status(502).json({error:"ElevenLabs request failed"});
+    const buf=Buffer.from(await r.arrayBuffer());
+    res.setHeader("Content-Type","audio/mpeg");res.send(buf);
+  }catch(e){res.status(500).json({error:"Voice generation failed"});}
+});
+
 app.post("/api/ai/memory",auth,async(req,res)=>{
   const {content,memory_type="preference",importance=3}=req.body||{};
   if(!content) return res.status(400).json({error:"Memory content required"});
