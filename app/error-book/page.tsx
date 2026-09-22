@@ -1,72 +1,24 @@
 "use client";
-import {useEffect,useState} from "react";
+import {useEffect,useMemo,useState} from "react";
 import {Gate,Card,SectionHead,api} from "../../components/jarvis";
-
+const TYPES=["Conceptual Gap","Calculation Slip","Sign Convention","Formula Forgotten","Silly Mistake"];
+const SUBJECTS=["Physics","Chemistry","Mathematics"];
 export default function ErrorBook(){
-  const [tab,setTab]=useState("Log Mistake");
-  const [errors,setErrors]=useState<any[]>([]);
-  const [subject,setSubject]=useState("Physics");
-  const [chapter,setChapter]=useState("");
-  const [type,setType]=useState("Conceptual Gap");
-  const [q,setQ]=useState("");
-  const [attempt,setAttempt]=useState("");
-  const [correct,setCorrect]=useState("");
-  const [busy,setBusy]=useState(false);
-
-  async function load(){setErrors(await api("/api/errors"))}
-  useEffect(()=>{load().catch(()=>{})},[]);
-
-  async function save(){
-    if(!q.trim()||busy)return;
-    setBusy(true);
-    try{
-      const e=await api("/api/errors",{method:"POST",body:JSON.stringify({subject,chapter,error_type:type,question:q,attempt,correct})});
-      setErrors(v=>[e,...v]);setQ("");setAttempt("");setCorrect("");setTab("Vault");
-    }finally{setBusy(false)}
-  }
-  async function update(id:string,patch:any){
-    const e=await api("/api/errors/"+id,{method:"PATCH",body:JSON.stringify(patch)});
-    setErrors(v=>v.map(x=>x.id===id?e:x));
-  }
-
-  const due=errors.filter(e=>!e.resolved&&e.next_review<=new Date().toISOString().slice(0,10)).length;
-
-  return <Gate title="Error Book" subtitle="Permanent mistake memory. Every saved error becomes evidence JARVIS can use to teach and plan better.">
-    <div className="tabbar">
-      {["Log Mistake","Vault","Review Due"].map(x=><button className={tab===x?"active":""} onClick={()=>setTab(x)} key={x}>{x}</button>)}
-    </div>
-    {tab==="Log Mistake"&&<Card>
-      <SectionHead kicker="SAVE THE FAILURE" title="Give JARVIS the exact mistake"/>
-      <div className="form-grid">
-        <label>Subject<select value={subject} onChange={e=>setSubject(e.target.value)}><option>Physics</option><option>Chemistry</option><option>Mathematics</option></select></label>
-        <label>Chapter<input value={chapter} onChange={e=>setChapter(e.target.value)} placeholder="Thermodynamics"/></label>
-        <label>Error type<select value={type} onChange={e=>setType(e.target.value)}><option>Conceptual Gap</option><option>Calculation Slip</option><option>Sign Convention</option><option>Formula Forgotten</option><option>Silly Mistake</option></select></label>
-      </div>
-      <label>Question / concept<textarea value={q} onChange={e=>setQ(e.target.value)} placeholder="Paste the question or describe the concept."/></label>
-      <label>What did I do wrong?<textarea value={attempt} onChange={e=>setAttempt(e.target.value)} placeholder="Your approach / wrong step"/></label>
-      <label>Correct idea / solution<textarea value={correct} onChange={e=>setCorrect(e.target.value)} placeholder="Correct method, formula, or explanation"/></label>
-      <button className="primary" onClick={save}>{busy?"Saving…":"🧠 Save to Error Book"}</button>
-      <p className="muted">You can also say: “JARVIS, save this as a Physics conceptual error…”</p>
-    </Card>}
-    {tab==="Vault"&&<Card>
-      <SectionHead kicker="PERMANENT VAULT" title={errors.length+" saved mistakes"}/>
-      {errors.length?errors.map((e,i)=><details className="error-item" key={e.id} open={i===0}>
-        <summary><span className={e.resolved?"good":"bad"}>●</span> [{e.subject}] {e.chapter||"Unknown"} · {e.error_type}</summary>
-        <div><p><b>Question:</b> {e.question}</p><p><b>Your mistake:</b> {e.attempt||"—"}</p><p><b>Correct:</b> {e.correct||"—"}</p>
-          <div className="action-row">
-            {!e.resolved&&<button className="secondary" onClick={()=>update(e.id,{resolved:true})}>✓ Mark mastered</button>}
-            <button className="ghost" onClick={()=>update(e.id,{next_review:new Date(Date.now()+3*86400000).toISOString().slice(0,10),resolved:false})}>↻ Review in 3 days</button>
-          </div>
-        </div>
-      </details>):<div className="empty">No mistakes saved yet.</div>}
-    </Card>}
-    {tab==="Review Due"&&<Card>
-      <SectionHead kicker="SPACED REVIEW" title={due+" mistakes due now"}/>
-      {errors.filter(e=>!e.resolved&&e.next_review<=new Date().toISOString().slice(0,10)).map(e=><div className="list-row" key={e.id}>
-        <div><b>{e.subject} · {e.chapter||"Unknown"}</b><small>{e.error_type} · review date {e.next_review}</small></div>
-        <button className="secondary" onClick={()=>update(e.id,{resolved:true})}>✓ Mastered</button>
-      </div>)}
-      {!due&&<div className="empty">Nothing is due right now. Good.</div>}
-    </Card>}
-  </Gate>
+ const [tab,setTab]=useState("Log New Mistake"),[errors,setErrors]=useState<any[]>([]),[subject,setSubject]=useState("Physics"),[chapter,setChapter]=useState(""),[type,setType]=useState(TYPES[0]),[q,setQ]=useState(""),[attempt,setAttempt]=useState(""),[correct,setCorrect]=useState(""),[image,setImage]=useState(""),[busy,setBusy]=useState(false),[filter,setFilter]=useState("All Subjects"),[meta,setMeta]=useState<any>({}),[weekly,setWeekly]=useState("");
+ async function load(){const [e,m]=await Promise.all([api("/api/errors"),api("/api/module/error_meta")]);setErrors(e);setMeta(m||{})}
+ useEffect(()=>{load().catch(()=>{})},[]);
+ async function fileToData(f:File){if(f.size>900000)throw new Error("Image is too large. Use an image under 900 KB.");return await new Promise<string>((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.onerror=reject;r.readAsDataURL(f)})}
+ async function save(){if(!q.trim()||!chapter.trim()||busy)return;setBusy(true);try{let root="Misapplication of core principles under test conditions.",remedy="Review theory and solve 3 similar practice drills.";try{const x=await api("/api/ai/chat",{method:"POST",body:JSON.stringify({message:"Analyze this JEE mistake. Subject: "+subject+", Chapter: "+chapter+", Error type: "+type+". Question: "+q+". Wrong Attempt: "+attempt+". Give root cause and remedy."})});if(x.answer)root=x.answer.slice(0,220)}catch{}const e=await api("/api/errors",{method:"POST",body:JSON.stringify({subject,chapter,error_type:type,question:q,attempt,correct,root_cause:root,remedy,image})});setErrors(v=>[e,...v]);setMeta((m:any)=>({...m,[e.id]:{root_cause:root,remedy,image}}));setQ("");setAttempt("");setCorrect("");setImage("");setTab("Active Error Vault & Filters")}finally{setBusy(false)}}
+ async function update(id:string,patch:any){const e=await api("/api/errors/"+id,{method:"PATCH",body:JSON.stringify(patch)});setErrors(v=>v.map(x=>x.id===id?e:x))}
+ async function remove(id:string){const next=errors.filter(x=>x.id!==id),nm={...meta};delete nm[id];setErrors(next);setMeta(nm);await api("/api/module/error_meta",{method:"PUT",body:JSON.stringify({data:nm})})}
+ async function solveAI(e:any){setBusy(true);try{const x=await api("/api/ai/chat",{method:"POST",body:JSON.stringify({message:"You are an expert JEE tutor. Solve this mistake step-by-step. Subject: "+e.subject+"; Chapter: "+e.chapter+"; Question: "+e.question+"; Wrong Attempt: "+e.attempt+". Explain concept, exact mistake, correct method, and one exam trap."})});const nm={...meta,[e.id]:{...(meta[e.id]||{}),ai_solution:x.answer||""}};setMeta(nm);await api("/api/module/error_meta",{method:"PUT",body:JSON.stringify({data:nm})})}catch{}finally{setBusy(false)}}
+ const due=useMemo(()=>errors.filter(e=>!e.resolved&&e.next_review<=new Date().toISOString().slice(0,10)),[errors]),filtered=filter==="All Subjects"?errors:errors.filter(e=>e.subject===filter),resolved=errors.filter(e=>e.resolved).length,health=errors.length?Math.round(resolved/errors.length*100):100;
+ async function report(){setBusy(true);try{const x=await api("/api/ai/chat",{method:"POST",body:JSON.stringify({message:"Create a weekly Error Book report from these saved mistakes: "+JSON.stringify(errors).slice(0,16000)+". Give repeated error types, risky chapters, root causes, revision priorities and a 7-day corrective drill."})});setWeekly(x.answer||"")}catch(e:any){setWeekly(e.message||"Report failed")}finally{setBusy(false)}}
+ return <Gate title="Error Book" subtitle="Samasya Lab: permanent mistake memory, root-cause analysis and spaced repetition.">
+  <div className="tabbar">{["Log New Mistake","Active Error Vault & Filters","Analytics Dashboard","Weekly AI Report"].map(x=><button className={tab===x?"active":""} onClick={()=>setTab(x)} key={x}>{x}</button>)}</div>
+  {tab==="Log New Mistake"&&<Card><SectionHead kicker="SAVE THE FAILURE" title="Log Mistake with Question / Attempt Image"/><p className="muted">Upload the question or wrong solution so the mistake remains a permanent reference.</p><div className="form-grid"><label>Select Subject<select value={subject} onChange={e=>setSubject(e.target.value)}>{SUBJECTS.map(x=><option key={x}>{x}</option>)}</select></label><label>Chapter Name<input value={chapter} onChange={e=>setChapter(e.target.value)} placeholder="Rotational Motion, GOC, Thermodynamics…"/></label><label>Error Type<select value={type} onChange={e=>setType(e.target.value)}>{TYPES.map(x=><option key={x}>{x}</option>)}</select></label></div><label>📤 Upload Question / Wrong Attempt Image<input type="file" accept="image/png,image/jpeg,image/webp" onChange={async e=>{const f=e.target.files?.[0];if(!f)return;try{setImage(await fileToData(f))}catch(err:any){alert(err.message)}}}/></label>{image&&<img src={image} className="uploaded-preview" alt="mistake reference"/>}<label>❌ Question / Concept Statement / Notes<textarea value={q} onChange={e=>setQ(e.target.value)} placeholder="Summarize the question or concept."/></label><label>⚠️ What was your mistake / wrong attempt?<textarea value={attempt} onChange={e=>setAttempt(e.target.value)} placeholder="Why did you get it wrong?"/></label><label>✅ Correct Solution / Formula<textarea value={correct} onChange={e=>setCorrect(e.target.value)} placeholder="Correct approach / formula."/></label><button className="primary" onClick={save} disabled={busy}>{busy?"🧠 Analyzing…":"🧠 Analyze & Save to Permanent Vault"}</button></Card>}
+  {tab==="Active Error Vault & Filters"&&<Card><SectionHead kicker="PERMANENT ERROR VAULT" title="Chapter-wise filters"/><select value={filter} onChange={e=>setFilter(e.target.value)}><option>All Subjects</option>{SUBJECTS.map(x=><option key={x}>{x}</option>)}</select>{!filtered.length?<div className="empty">Your error vault is empty for this filter.</div>:filtered.map((e,i)=><details className="error-item" key={e.id} open={i===0}><summary><span className={e.resolved?"good":"bad"}>●</span> [{e.subject}] {e.chapter||"Unknown Chapter"} — Type: {e.error_type} · Review Due: {e.next_review||"—"}</summary><div>{meta[e.id]?.image&&<img src={meta[e.id].image} className="uploaded-preview" alt="saved mistake"/>}<p><b>❌ Notes / Question:</b> {e.question}</p><p><b>⚠️ Your Mistake:</b> {e.attempt||"—"}</p><p><b>✅ Correct Solution:</b> {e.correct||"—"}</p><p><b>🧠 AI Root Cause:</b> {meta[e.id]?.root_cause||"Diagnosis stored with the entry."}</p><div className="action-row"><button className="primary" disabled={busy} onClick={()=>solveAI(e)}>✨ Solve with AI & Explain Concept</button>{!e.resolved?<button className="secondary" onClick={()=>update(e.id,{resolved:true})}>✅ Mark as Mastered</button>:<span className="good">Mastered ✅</span>}<button className="ghost" onClick={()=>update(e.id,{next_review:new Date(Date.now()+3*86400000).toISOString().slice(0,10),resolved:false})}>🔄 Review (+3 Days)</button><button className="danger" onClick={()=>remove(e.id)}>🗑 Delete</button></div>{meta[e.id]?.ai_solution&&<div className="ai-report"><h3>💡 AI GuRu Detailed Solution</h3><p>{meta[e.id].ai_solution}</p></div>}</div></details>)}</Card>}
+  {tab==="Analytics Dashboard"&&<Card><SectionHead kicker="LEARNING HEALTH" title="Error Analytics"/><div className="stats"><div className="stat-card"><small>❤️ Learning Health</small><strong>{health}%</strong></div><div className="stat-card"><small>📚 Total Saved Errors</small><strong>{errors.length}</strong></div><div className="stat-card"><small>🏆 Mastered</small><strong>{resolved}</strong></div><div className="stat-card"><small>🔔 Review Due</small><strong>{due.length}</strong></div></div><div className="two-col"><Card><h3>Error type breakdown</h3>{TYPES.map(t=><p key={t}>{t}: {errors.filter(e=>e.error_type===t).length}</p>)}</Card><Card><h3>Subject breakdown</h3>{SUBJECTS.map(s=><p key={s}>{s}: {errors.filter(e=>e.subject===s).length}</p>)}</Card></div></Card>}
+  {tab==="Weekly AI Report"&&<Card><SectionHead kicker="WEEKLY AI PERFORMANCE" title="AI remediation report"/><p className="muted">A comprehensive weekly breakdown generated from mistakes actually saved in your vault.</p><button className="primary" onClick={report} disabled={busy}>{busy?"Generating…":"📑 Generate Weekly AI Report"}</button>{weekly&&<div className="ai-report"><p>{weekly}</p></div>}</Card>}
+ </Gate>
 }
