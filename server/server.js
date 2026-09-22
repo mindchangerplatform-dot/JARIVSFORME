@@ -81,6 +81,13 @@ async function initDb(){
     create index if not exists study_logs_user_date on study_logs(user_id,log_date);
     create index if not exists backlog_user_status on backlog(user_id,status);
     create index if not exists chat_user_date on chat_messages(user_id,created_at);
+    create table if not exists app_modules(
+      user_id uuid not null references users(id) on delete cascade,
+      module text not null,
+      data jsonb not null default '{}'::jsonb,
+      updated_at timestamptz not null default now(),
+      primary key(user_id,module)
+    );
   `);
 }
 
@@ -140,7 +147,21 @@ app.post("/api/study/log",auth,async(req,res)=>{
   res.json(r.rows[0]);
 });
 
-app.get("/api/backlog",auth,async(req,res)=>{
+\napp.get("/api/module/:module",auth,async(req,res)=>{
+  const key=String(req.params.module||"").slice(0,80);
+  if(!/^[a-zA-Z0-9_-]+$/.test(key)) return res.status(400).json({error:"Invalid module"});
+  const r=await pool.query("select data from app_modules where user_id=$1 and module=$2",[req.user.id,key]);
+  res.json(r.rowCount?r.rows[0].data:{});
+});
+app.put("/api/module/:module",auth,async(req,res)=>{
+  const key=String(req.params.module||"").slice(0,80);
+  if(!/^[a-zA-Z0-9_-]+$/.test(key)) return res.status(400).json({error:"Invalid module"});
+  const data=req.body?.data;
+  if(data===undefined) return res.status(400).json({error:"data is required"});
+  const r=await pool.query("insert into app_modules(user_id,module,data,updated_at) values($1,$2,$3,now()) on conflict(user_id,module) do update set data=excluded.data,updated_at=now() returning data",[req.user.id,key,JSON.stringify(data)]);
+  res.json(r.rows[0].data);
+});
+\napp.get("/api/backlog",auth,async(req,res)=>{
   const r=await pool.query("select * from backlog where user_id=$1 order by case priority when 'HIGH' then 1 when 'MEDIUM' then 2 else 3 end,created_at desc",[req.user.id]);res.json(r.rows);
 });
 
@@ -169,7 +190,7 @@ app.post("/api/missions",auth,async(req,res)=>{const {title,subject="General",ti
 app.patch("/api/missions/:id",auth,async(req,res)=>{const r=await pool.query("update mission_tasks set done=$1 where id=$2 and user_id=$3 returning *",[!!req.body.done,req.params.id,req.user.id]);res.json(r.rows[0]||null);});
 app.delete("/api/missions/:id",auth,async(req,res)=>{await pool.query("delete from mission_tasks where id=$1 and user_id=$2",[req.params.id,req.user.id]);res.json({ok:true});});
 app.get("/api/errors",auth,async(req,res)=>{const r=await pool.query("select * from error_book where user_id=$1 order by resolved,next_review nulls last,created_at desc",[req.user.id]);res.json(r.rows);});
-app.post("/api/errors",auth,async(req,res)=>{const {subject,chapter="",error_type="Conceptual Gap",question="",attempt="",correct=""}=req.body||{};const r=await pool.query("insert into error_book(user_id,subject,chapter,error_type,question,attempt,correct,next_review) values($1,$2,$3,$4,$5,$6,$7,current_date+1) returning *",[req.user.id,subject,chapter,error_type,question,attempt,correct]);res.json(r.rows[0]);});
+app.post("/api/errors",auth,async(req,res)=>{const {subject,chapter="",error_type="Conceptual Gap",question="",attempt="",correct="",root_cause="",remedy="",ai_solution="",image=""}=req.body||{};const r=await pool.query("insert into error_book(user_id,subject,chapter,error_type,question,attempt,correct,next_review) values($1,$2,$3,$4,$5,$6,$7,current_date+1) returning *",[req.user.id,subject,chapter,error_type,question,attempt,correct]);const row=r.rows[0];if(root_cause||remedy||ai_solution||image){await pool.query("insert into app_modules(user_id,module,data,updated_at) values($1,$2,$3,now()) on conflict(user_id,module) do update set data=app_modules.data || excluded.data,updated_at=now()",[req.user.id,"error_meta",JSON.stringify({[row.id]:{root_cause,remedy,ai_solution,image}})]);}res.json(row);});
 app.patch("/api/errors/:id",auth,async(req,res)=>{const r=await pool.query("update error_book set resolved=coalesce($1,resolved),next_review=coalesce($2,next_review) where id=$3 and user_id=$4 returning *",[req.body.resolved??null,req.body.next_review||null,req.params.id,req.user.id]);res.json(r.rows[0]||null);});
 
 app.post("/api/ai/command",auth,async(req,res)=>{
