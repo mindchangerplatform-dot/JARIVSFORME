@@ -1,108 +1,36 @@
 "use client";
-
-import { useMemo, useState } from "react";
-
-const initial = {
-  hours: 5.5,
-  questions: 83,
-  accuracy: 68,
-  backlog: 12,
-  streak: 4
-};
-
-export default function Home() {
-  const [stats, setStats] = useState(initial);
-  const [note, setNote] = useState("");
-  const [saved, setSaved] = useState(false);
-
-  const progress = useMemo(() => Math.min(100, Math.round((stats.hours / 8) * 100)), [stats.hours]);
-
-  function logStudy() {
-    setStats((s) => ({ ...s, hours: Math.min(12, +(s.hours + 0.5).toFixed(1)) }));
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1800);
-  }
-
-  return (
-    <main className="shell">
-      <aside className="sidebar">
-        <div className="brand"><span className="brand-mark">J</span><div><strong>JARVIS</strong><small>FOR ME</small></div></div>
-        <nav>
-          <a className="active">Dashboard</a>
-          <a>AI Mentor</a>
-          <a>Study Planner</a>
-          <a>Backlog</a>
-          <a>Practice</a>
-          <a>Tests</a>
-          <a>Error Book</a>
-          <a>Analytics</a>
-        </nav>
-        <div className="mentor-card">
-          <span className="pulse" />
-          <div><b>Mentor online</b><small>Ready to plan your day.</small></div>
-        </div>
-      </aside>
-
-      <section className="content">
-        <header className="topbar">
-          <div><span className="eyebrow">TUESDAY · 22 SEPTEMBER</span><h1>Good evening, warrior.</h1><p>Your JEE journey, tracked in one place.</p></div>
-          <button className="ghost">⚙ Settings</button>
-        </header>
-
-        <div className="hero">
-          <div><span className="tag">TODAY'S MISSION</span><h2>Make today count.</h2><p>8 hours planned · 120 questions · revise Thermodynamics.</p></div>
-          <button className="primary" onClick={logStudy}>＋ Log 30 min</button>
-        </div>
-
-        <div className="stats">
-          <Stat label="Study hours" value={stats.hours.toFixed(1)} suffix="/ 8h" meta="Today's progress" />
-          <Stat label="Questions" value={stats.questions} suffix="/ 120" meta="67 questions left" />
-          <Stat label="Accuracy" value={stats.accuracy + "%"} suffix="" meta="Target ≥ 75%" />
-          <Stat label="Backlog" value={stats.backlog} suffix="" meta="3 due for revision" />
-        </div>
-
-        <div className="grid">
-          <section className="panel wide">
-            <div className="panel-head"><div><span className="eyebrow">DAILY PLAN</span><h3>Today's study blocks</h3></div><span className="status">AI generated</span></div>
-            <Plan time="6:00–7:30 PM" title="Chemistry · Thermodynamics" detail="Concept revision + 25 PYQs" done />
-            <Plan time="7:45–9:15 PM" title="Mathematics · Circular Motion" detail="Theory + 30 mixed questions" />
-            <Plan time="9:45–11:15 PM" title="Physics · Laws of Motion" detail="Friction + FBD practice" />
-          </section>
-
-          <section className="panel">
-            <div className="panel-head"><div><span className="eyebrow">AI MENTOR</span><h3>Quick check-in</h3></div></div>
-            <p className="mentor-text">“You are at {stats.hours}h today. Finish the next block before switching topics.”</p>
-            <textarea value={note} onChange={(e) => setNote(e.target.value)} placeholder="Tell JARVIS what you studied..." />
-            <button className="primary full" onClick={() => setSaved(true)}>{saved ? "Saved ✓" : "Update mentor"}</button>
-          </section>
-
-          <section className="panel">
-            <div className="panel-head"><div><span className="eyebrow">BACKLOG</span><h3>Needs attention</h3></div><span className="count">{stats.backlog}</span></div>
-            <Backlog subject="Chemistry" topic="Thermodynamics" priority="HIGH" />
-            <Backlog subject="Maths" topic="Circular Motion" priority="HIGH" />
-            <Backlog subject="Physics" topic="Laws of Motion" priority="MEDIUM" />
-          </section>
-
-          <section className="panel wide">
-            <div className="panel-head"><div><span className="eyebrow">STREAK</span><h3>Consistency</h3></div><b>{stats.streak} days</b></div>
-            <div className="progress-row"><span>Weekly study target</span><b>{progress}%</b></div>
-            <div className="progress"><i style={{ width: progress + "%" }} /></div>
-            <div className="days">{["M","T","W","T","F","S","S"].map((d, i) => <span key={i} className={i < 4 ? "filled" : ""}>{d}</span>)}</div>
-          </section>
-        </div>
-
-        <footer>JARVISFORME · AI JEE Mentor <span>Supabase + OpenAI + ElevenLabs ready</span></footer>
-      </section>
-    </main>
-  );
+import {useEffect,useRef,useState} from "react";
+const API="https://jarivsforme-api.onrender.com";
+export default function Home(){
+ const [token,setToken]=useState<string|null>(null),[user,setUser]=useState<any>(null),[d,setD]=useState<any>({hours:0,questions:0,accuracy:0,backlog:0,highBacklog:0,plans:[]});
+ const [email,setEmail]=useState(""),[password,setPassword]=useState(""),[name,setName]=useState(""),[reg,setReg]=useState(false),[err,setErr]=useState("");
+ const [msg,setMsg]=useState(""),[answer,setAnswer]=useState(""),[busy,setBusy]=useState(false),[listening,setListening]=useState(false),[planBusy,setPlanBusy]=useState(false);
+ const rec=useRef<any>(null);
+ useEffect(()=>{const t=localStorage.getItem("jarvis_token");if(t){setToken(t);load(t)}},[]);
+ async function req(path:string,opt:any={}){
+  const t=token||localStorage.getItem("jarvis_token");
+  const r=await fetch(API+path,{...opt,headers:{"Content-Type":"application/json",...(t?{Authorization:"Bearer "+t}:{}),...(opt.headers||{})}});
+  const x=await r.json().catch(()=>({}));if(!r.ok)throw new Error(x.error||"Request failed");return x;
+ }
+ async function load(t:string){try{const h=await fetch(API+"/api/me",{headers:{Authorization:"Bearer "+t}});if(!h.ok)throw 0;setUser(await h.json());setD(await (await fetch(API+"/api/dashboard",{headers:{Authorization:"Bearer "+t}})).json())}catch{localStorage.removeItem("jarvis_token");setToken(null)}}
+ async function auth(){setErr("");try{const x=await req(reg?"/api/auth/register":"/api/auth/login",{method:"POST",body:JSON.stringify(reg?{email,password,name}:{email,password})});localStorage.setItem("jarvis_token",x.token);setToken(x.token);setUser(x.user);load(x.token)}catch(e:any){setErr(e.message)}}
+ async function refresh(){try{setD(await req("/api/dashboard"))}catch{}}
+ async function log(){try{await req("/api/study/log",{method:"POST",body:JSON.stringify({minutes:30})});await refresh();speak("Thirty minutes logged. Keep going.")}catch(e:any){setErr(e.message)}}
+ async function send(text?:string){const q=(text===undefined?msg:text).trim();if(!q||busy)return;setMsg("");setBusy(true);try{const x=await req("/api/ai/chat",{method:"POST",body:JSON.stringify({message:q})});setAnswer(x.answer);speak(x.answer);await refresh()}catch(e:any){setErr(e.message)}finally{setBusy(false)}}
+ async function makePlan(){setPlanBusy(true);try{await req("/api/ai/plan",{method:"POST",body:"{}"});await refresh();speak("Your study plan is ready.")}catch(e:any){setErr(e.message)}finally{setPlanBusy(false)}}
+ function speak(text:string){if(typeof window==="undefined"||!window.speechSynthesis)return;window.speechSynthesis.cancel();const u=new SpeechSynthesisUtterance(text.slice(0,1800));u.rate=.98;window.speechSynthesis.speak(u)}
+ function voice(){const SR=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!SR){setErr("Voice input needs Chrome.");return}if(listening){rec.current?.stop();return}const r=new SR();rec.current=r;r.lang="en-IN";r.interimResults=false;r.continuous=false;r.onstart=()=>setListening(true);r.onend=()=>setListening(false);r.onerror=()=>{setListening(false);setErr("Mic permission or recognition failed.")};r.onresult=(e:any)=>{const t=e.results[0][0].transcript;if(/log (30|thirty) (minutes?|mins?)/i.test(t))log();else send(t)};r.start()}
+ if(!token)return <Auth reg={reg} setReg={setReg} email={email} setEmail={setEmail} password={password} setPassword={setPassword} name={name} setName={setName} err={err} auth={auth}/>;
+ return <main className="app"><aside className="sidebar"><Brand/><nav>{["Dashboard","AI Mentor","Study Planner","Backlog","Practice","Tests","Error Book","Analytics"].map((x,i)=><button className={i===0?"nav active":"nav"} key={x}>{x}</button>)}</nav><div className="mentor-card"><span className="pulse"/><div><b>JARVIS online</b><small>Voice + AI ready</small></div></div><button className="logout" onClick={()=>{localStorage.removeItem("jarvis_token");location.reload()}}>Log out</button></aside>
+ <section className="content"><header className="topbar"><div><span className="eyebrow">JEE COMMAND CENTER</span><h1>Good evening, {user?.name||"warrior"}.</h1><p>Real progress, AI planning and voice commands.</p></div><button className={"voice "+(listening?"listening":"")} onClick={voice}>{listening?"● Listening…":"🎙 Talk to JARVIS"}</button></header>
+ {err&&<div className="error">{err}</div>}<section className="hero"><div><span className="tag">TODAY'S MISSION</span><h2>Make today count.</h2><p>{d.plans.length?d.plans.length+" AI study blocks ready.":"Generate a plan from your real progress."}</p></div><div className="hero-actions"><button className="primary" onClick={log}>＋ Log 30 min</button><button className="secondary" onClick={makePlan}>{planBusy?"Generating…":"✦ Generate AI plan"}</button></div></section>
+ <div className="stats"><Stat label="Study hours" value={Number(d.hours).toFixed(1)} meta="Last 7 days"/><Stat label="Questions" value={d.questions} meta="Last 7 days"/><Stat label="Accuracy" value={d.accuracy+"%"} meta="Logged questions"/><Stat label="Backlog" value={d.backlog} meta={d.highBacklog+" high priority"}/></div>
+ <div className="main-grid"><section className="panel"><Head a="DAILY PLAN" b="Today's study blocks"/>{d.plans.length?d.plans.map((p:any,i:number)=><div className="plan" key={p.id||i}><span className="check">{p.completed?"✓":""}</span><div><small>{p.start_time||"Flexible"} {p.end_time?"– "+p.end_time:""}</small><b>{p.subject} · {p.topic}</b><p>{p.task}</p></div></div>):<div className="empty">No plan yet. Generate one from your real data.</div>}</section>
+ <section className="panel"><Head a="AI MENTOR" b="Talk to JARVIS"/><div className="answer">{answer||"Ask what to study, tell me what you completed, or speak your problem."}</div><div className="composer"><textarea value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();send()}}} placeholder="e.g. I have 3 hours tonight. What should I study?"/><button className="mic" onClick={voice}>🎙</button></div><button className="primary full" onClick={()=>send()} disabled={busy}>{busy?"JARVIS is thinking…":"Send to JARVIS"}</button></section>
+ <section className="panel"><Head a="QUICK ACTIONS" b="Study controls"/><button className="action" onClick={log}>⏱ Log 30 minutes</button><button className="action" onClick={()=>send("Analyze my current JEE progress and tell me my next action.")}>⌁ Analyze my progress</button><button className="action" onClick={()=>send("Give me a focused revision session for my highest priority backlog.")}>↻ Start backlog revision</button><button className="action" onClick={makePlan}>✦ Rebuild today's plan</button></section>
+ <section className="panel"><Head a="BACKLOG" b="Needs attention"/><div className="backlog-row"><b>High priority</b><span>{d.highBacklog}</span></div><div className="backlog-row"><b>Total open</b><span>{d.backlog}</span></div><p className="muted">JARVIS uses this data when planning and answering you.</p></section></div><footer>JARVISFORME · Vercel + Render PostgreSQL + OpenAI · Voice ready</footer></section></main>
 }
-
-function Stat({label, value, suffix, meta}:{label:string;value:string|number;suffix:string;meta:string}) {
-  return <div className="stat"><span>{label}</span><strong>{value}<em>{suffix}</em></strong><small>{meta}</small></div>;
-}
-function Plan({time,title,detail,done=false}:{time:string;title:string;detail:string;done?:boolean}) {
-  return <div className={"plan " + (done ? "done" : "")}><span className="check">{done ? "✓" : ""}</span><div><small>{time}</small><b>{title}</b><p>{detail}</p></div></div>;
-}
-function Backlog({subject,topic,priority}:{subject:string;topic:string;priority:string}) {
-  return <div className="backlog"><div><small>{subject}</small><b>{topic}</b></div><span className={priority==="HIGH"?"high":"medium"}>{priority}</span></div>;
-}
+function Brand(){return <div className="brand"><span className="brand-mark">J</span><div><strong>JARVIS</strong><small>FOR ME</small></div></div>}
+function Head({a,b}:{a:string;b:string}){return <div className="panel-head"><div><span className="eyebrow">{a}</span><h3>{b}</h3></div><span className="status">LIVE</span></div>}
+function Stat({label,value,meta}:{label:string;value:string|number;meta:string}){return <div className="stat"><span>{label}</span><strong>{value}</strong><small>{meta}</small></div>}
+function Auth(p:any){return <main className="auth-page"><div className="auth-card"><div className="auth-brand"><Brand/></div><span className="eyebrow">PERSONAL JEE MENTOR</span><h1>{p.reg?"Create your JARVIS":"Welcome back"}</h1><p>AI planning, real tracking and voice commands.</p>{p.reg&&<input value={p.name} onChange={(e:any)=>p.setName(e.target.value)} placeholder="Your name"/>}<input value={p.email} onChange={(e:any)=>p.setEmail(e.target.value)} placeholder="Email"/><input type="password" value={p.password} onChange={(e:any)=>p.setPassword(e.target.value)} placeholder="Password (6+ characters)"/>{p.err&&<div className="error">{p.err}</div>}<button className="primary full" onClick={p.auth}>{p.reg?"Create account":"Log in"}</button><button className="switch" onClick={()=>p.setReg(!p.reg)}>{p.reg?"Already have an account? Log in":"New here? Create account"}</button></div></main>}
