@@ -69,3 +69,4 @@ export default function ErrorBook(){
       {!due&&<div className="empty">Nothing is due right now. Good.</div>}
     </Card>}
   </Gate>
+}
