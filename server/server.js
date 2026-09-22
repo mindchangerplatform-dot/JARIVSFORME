@@ -206,7 +206,14 @@ app.post("/api/ai/command",auth,async(req,res)=>{
       return res.json({action:"complete_backlog",item:r.rows[0]||null,message:r.rowCount?"Marked that backlog item complete.":"I could not find that backlog item."});
     }
     return res.json({action:"answer",message:action.message||"I understood the command, but I need a little more detail."});
-  }catch(e){res.status(500).json({error:"Voice command failed",detail:e.message});}
+  }catch(e){
+    console.error("AI command error:",e);
+    const status=e?.status===429?503:500;
+    const message=e?.status===429
+      ?"JARVIS AI is out of OpenAI credits. Add credits to the OpenAI API project used by Render."
+      :"Voice command failed. Please try again.";
+    res.status(status).json({error:message});
+  }
 });
 
 app.post("/api/ai/chat",auth,async(req,res)=>{
@@ -224,7 +231,14 @@ app.post("/api/ai/chat",auth,async(req,res)=>{
     const answer=response.output_text||"I couldn't generate a response.";
     await pool.query("insert into chat_messages(user_id,role,content) values($1,'assistant',$2)",[req.user.id,answer]);
     res.json({answer});
-  }catch(e){res.status(500).json({error:"AI request failed",detail:e.message});}
+  }catch(e){
+    console.error("AI chat error:",e);
+    const status=e?.status===429?503:500;
+    const message=e?.status===429
+      ?"JARVIS AI is out of OpenAI credits. Add credits to the OpenAI API project used by Render."
+      :"AI request failed. Please try again.";
+    res.status(status).json({error:message});
+  }
 });
 
 app.post("/api/ai/plan",auth,async(req,res)=>{
