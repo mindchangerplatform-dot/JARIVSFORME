@@ -2,159 +2,51 @@
 import {useEffect,useRef,useState} from "react";
 import {Gate,api} from "../../components/jarvis";
 
-type Msg={role:"user"|"assistant",content:string};
+type Msg={role:"user"|"assistant",content:string,attachment?:string};
+type Chat={messages:Msg[],pinned?:boolean,created_at?:number,updated_at?:number};
 
 export default function AIGuru(){
-  const [msg,setMsg]=useState("");
-  const [busy,setBusy]=useState(false);
-  const [history,setHistory]=useState<Msg[]>([]);
-  const [listening,setListening]=useState(false);
-  const [voiceStatus,setVoiceStatus]=useState("Voice command ready");
-  const [speaking,setSpeaking]=useState(false);
-  const [autoVoice,setAutoVoice]=useState(true);
-  const rec=useRef<any>(null);
+ const [sessions,setSessions]=useState<Record<string,Chat>>({}),[current,setCurrent]=useState("Master Command Hub"),[search,setSearch]=useState(""),[mode,setMode]=useState("Quick Solve");
+ const [msg,setMsg]=useState(""),[busy,setBusy]=useState(false),[listening,setListening]=useState(false),[speaking,setSpeaking]=useState(false),[autoVoice,setAutoVoice]=useState(true),[voiceStatus,setVoiceStatus]=useState("Voice command ready"),[report,setReport]=useState(""),[reportDue,setReportDue]=useState(false);
+ const rec=useRef<any>(null);
+ const msgs=sessions[current]?.messages||[];
 
-  useEffect(()=>()=>{try{rec.current?.stop()}catch{}},[]);
+ async function load(){
+   const x=await api("/api/module/ai_guru");const data=x&&typeof x==="object"?x:{};
+   const chats=data.sessions&&typeof data.sessions==="object"?data.sessions:{"Master Command Hub":{messages:[],pinned:true,created_at:Date.now(),updated_at:Date.now()}};
+   setSessions(chats);setCurrent(data.current&&chats[data.current]?data.current:Object.keys(chats)[0]);setReport(data.last_report||"");setReportDue(!!data.last_report_date&&Math.floor((Date.now()-new Date(data.last_report_date).getTime())/86400000)>=3||!data.last_report_date);
+ }
+ useEffect(()=>{load().catch(()=>{})},[]);
+ async function persist(next:any){setSessions(next.sessions);setCurrent(next.current);await api("/api/module/ai_guru",{method:"PUT",body:JSON.stringify({data:next})})}
+ function cleanTitle(t:string){return (t||"New Chat").replace(/^(please|can you|could you|help me|bhai|bro)\\s*[,!:.-]*\\s*/i,"").trim().split(/\s+/).slice(0,8).join(" ").slice(0,48)||"New Chat"}
+ function uniqueTitle(base:string){let n=cleanTitle(base),i=2;while(sessions[n])n=cleanTitle(base)+" "+i++;return n}
+ async function newChat(){const n=uniqueTitle("New Chat"),now=Date.now(),next={...sessions,[n]:{messages:[],pinned:false,created_at:now,updated_at:now}};await persist({sessions:next,current:n,last_report:report,last_report_date:report?new Date().toISOString():undefined})}
+ async function selectChat(n:string){setCurrent(n);await api("/api/module/ai_guru",{method:"PUT",body:JSON.stringify({data:{sessions,current:n,last_report:report,last_report_date:report?new Date().toISOString():undefined}})}).catch(()=>{})}
+ async function pinChat(n:string){const next={...sessions,[n]:{...sessions[n],pinned:!sessions[n].pinned,updated_at:Date.now()}};await persist({sessions:next,current,last_report:report,last_report_date:report?new Date().toISOString():undefined})}
+ async function deleteChat(n:string){if(Object.keys(sessions).length<=1)return;const next={...sessions};delete next[n];const c=current===n?Object.keys(next)[0]:current;await persist({sessions:next,current:c,last_report:report,last_report_date:report?new Date().toISOString():undefined})}
 
-  async function speak(text:string){
-    if(!text||speaking)return;
-    setSpeaking(true);
-    try{
-      const token=localStorage.getItem("jarvis_token")||"";
-      const r=await fetch("https://jarivsforme-api.onrender.com/api/voice/speak",{
-        method:"POST",
-        headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},
-        body:JSON.stringify({text})
-      });
-      if(!r.ok)throw new Error();
-      const blob=await r.blob();
-      const url=URL.createObjectURL(blob);
-      const audio=new Audio(url);
-      audio.onended=()=>{URL.revokeObjectURL(url);setSpeaking(false)};
-      audio.onerror=()=>{URL.revokeObjectURL(url);setSpeaking(false)};
-      await audio.play();
-    }catch{
-      try{
-        const u=new SpeechSynthesisUtterance(text);
-        u.lang="en-IN";u.rate=.95;
-        u.onend=()=>setSpeaking(false);u.onerror=()=>setSpeaking(false);
-        speechSynthesis.cancel();speechSynthesis.speak(u);
-      }catch{setSpeaking(false)}
-    }
-  }
+ async function speak(text:string){if(!text||speaking)return;setSpeaking(true);try{const token=localStorage.getItem("jarvis_token")||"";const r=await fetch("https://jarivsforme-api.onrender.com/api/voice/speak",{method:"POST",headers:{"Content-Type":"application/json",Authorization:"Bearer "+token},body:JSON.stringify({text:text.slice(0,3000)})});if(!r.ok)throw new Error();const audio=new Audio(URL.createObjectURL(await r.blob()));audio.onended=()=>setSpeaking(false);audio.onerror=()=>setSpeaking(false);await audio.play()}catch{try{const u=new SpeechSynthesisUtterance(text);u.lang="en-IN";u.rate=.95;u.onend=()=>setSpeaking(false);u.onerror=()=>setSpeaking(false);speechSynthesis.cancel();speechSynthesis.speak(u)}catch{setSpeaking(false)}}}
 
-  async function ask(text:string,voice=false){
-    const q=text.trim();
-    if(!q||busy)return;
-    setMsg("");
-    setVoiceStatus(voice?"JARVIS is thinking…":"");
-    setBusy(true);
-    setHistory(h=>[...h,{role:"user",content:q}]);
-    try{
-      const x=await api("/api/ai/chat",{method:"POST",body:JSON.stringify({message:q})});
-      const answer=x.answer||"I couldn't generate a response.";
-      setHistory(h=>[...h,{role:"assistant",content:answer}]);
-      if(voice&&autoVoice) speak(answer);
-    }catch(e:any){
-      const answer=e.message||"AI request failed.";
-      setHistory(h=>[...h,{role:"assistant",content:answer}]);
-      if(voice&&autoVoice)speak(answer);
-    }finally{setBusy(false);if(!voice)setVoiceStatus("")}
-  }
+ async function ask(text:string,voice=false,attachmentText=""){const q=text.trim();if(!q||busy)return;setBusy(true);setMsg("");setVoiceStatus(voice?"JARVIS is thinking…":"");const user:Msg={role:"user",content:q,attachment:attachmentText||undefined};const base={...sessions,[current]:{...sessions[current],messages:[...(sessions[current]?.messages||[]),user],updated_at:Date.now()}};setSessions(base);try{const x=await api("/api/ai/chat",{method:"POST",body:JSON.stringify({message:"Response mode: "+mode+". "+q+(attachmentText?" ATTACHED CONTEXT: "+attachmentText.slice(0,30000):"")})});const answer=x.answer||"I couldn't generate a response.";const next={...base,[current]:{...base[current],messages:[...base[current].messages,{role:"assistant",content:answer}],updated_at:Date.now()}};setSessions(next);await api("/api/module/ai_guru",{method:"PUT",body:JSON.stringify({data:{sessions:next,current,last_report:report,last_report_date:report?new Date().toISOString():undefined}})});if(voice&&autoVoice)await speak(answer)}catch(e:any){const answer=e.message||"AI request failed.";const next={...base,[current]:{...base[current],messages:[...base[current].messages,{role:"assistant",content:answer}],updated_at:Date.now()}};setSessions(next);if(voice&&autoVoice)await speak(answer)}finally{setBusy(false);if(!voice)setVoiceStatus("")}}
 
-  async function voiceCommand(text:string){
-    if(!text.trim())return;
-    setBusy(true);setVoiceStatus("Executing voice command…");
-    setHistory(h=>[...h,{role:"user",content:"🎙 "+text}]);
-    try{
-      const x=await api("/api/ai/command",{method:"POST",body:JSON.stringify({command:text})});
-      const answer=x.message||"Done.";
-      setHistory(h=>[...h,{role:"assistant",content:answer}]);
-      if(autoVoice)await speak(answer);
-    }catch(e:any){
-      const answer=e.message||"Voice command failed.";
-      setHistory(h=>[...h,{role:"assistant",content:answer}]);
-      if(autoVoice)await speak(answer);
-    }finally{setBusy(false);setVoiceStatus("Voice command ready")}
-  }
+ async function voiceCommand(text:string){if(!text.trim())return;setBusy(true);setVoiceStatus("Executing voice command…");const base={...sessions,[current]:{...sessions[current],messages:[...(sessions[current]?.messages||[]),{role:"user",content:"🎙 "+text}],updated_at:Date.now()}};setSessions(base);try{const x=await api("/api/ai/command",{method:"POST",body:JSON.stringify({command:text})});const answer=x.message||"Done.";const next={...base,[current]:{...base[current],messages:[...base[current].messages,{role:"assistant",content:answer}],updated_at:Date.now()}};setSessions(next);await api("/api/module/ai_guru",{method:"PUT",body:JSON.stringify({data:{sessions:next,current,last_report:report,last_report_date:report?new Date().toISOString():undefined}})});if(autoVoice)await speak(answer)}catch(e:any){const answer=e.message||"Voice command failed.";const next={...base,[current]:{...base[current],messages:[...base[current].messages,{role:"assistant",content:answer}],updated_at:Date.now()}};setSessions(next);if(autoVoice)await speak(answer)}finally{setBusy(false);setVoiceStatus("Voice command ready")}}
 
-  function startVoice(){
-    const SR=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;
-    if(!SR){setVoiceStatus("Chrome voice input is required.");return}
-    if(listening){try{rec.current?.stop()}catch{};setListening(false);return}
-    const r=new SR();
-    rec.current=r;
-    r.lang="en-IN";r.interimResults=true;r.continuous=false;
-    r.onstart=()=>{setListening(true);setVoiceStatus("Listening… say a command or ask JARVIS anything");};
-    r.onresult=(e:any)=>{
-      let finalText="";
-      let live="";
-      for(let i=e.resultIndex;i<e.results.length;i++){
-        const t=e.results[i][0].transcript;
-        live+=t;
-        if(e.results[i].isFinal)finalText+=t;
-      }
-      if(finalText.trim()){
-  const q=finalText.trim();
-  setMsg(q);
-  const commandLike=/^(jarvis[\s,]*)?(add|create|put|save|log|mark|complete|finish|remove|delete|move|set|update|schedule)\b/i.test(q);
-  if(commandLike) voiceCommand(q); else ask(q,true);
-}
-      else if(live)setMsg(live);
-    };
-    r.onerror=()=>{setListening(false);setVoiceStatus("Could not hear that. Tap the mic and try again.")};
-    r.onend=()=>setListening(false);
-    r.start();
-  }
+ function startVoice(){const SR=(window as any).SpeechRecognition||(window as any).webkitSpeechRecognition;if(!SR){setVoiceStatus("Chrome voice input is required.");return}if(listening){try{rec.current?.stop()}catch{}setListening(false);return}const r=new SR();rec.current=r;r.lang="en-IN";r.interimResults=true;r.continuous=false;r.onstart=()=>{setListening(true);setVoiceStatus("Listening… say a command or ask JARVIS anything")};r.onresult=(e:any)=>{let finalText="";for(let i=e.resultIndex;i<e.results.length;i++)if(e.results[i].isFinal)finalText+=e.results[i][0].transcript;if(finalText.trim()){const q=finalText.trim();setMsg(q);const commandLike=/^(jarvis[\\s,]*)?(add|create|put|save|log|mark|complete|finish|remove|delete|move|set|update|schedule)\\b/i.test(q);if(commandLike)voiceCommand(q);else ask(q,true)}};r.onerror=()=>{setListening(false);setVoiceStatus("Could not hear that. Tap the mic and try again.")};r.onend=()=>setListening(false);r.start()}
 
-  return <Gate title="AI Tutor" subtitle="Your personal JEE tutor. Ask doubts, learn concepts, plan study, and control Todo / Backlog / Error Book with your voice.">
-    <div className="ai-layout">
-      <aside className="chat-sidebar">
-        <button className="primary full" onClick={()=>{setHistory([]);setMsg("");}}>＋ New Chat</button>
-        <div className="side-label">TRY JARVIS</div>
-        {[
-          "Teach me Thermodynamics from basics.",
-          "Analyze my backlog and tell me what to do first.",
-          "Explain this JEE question step by step.",
-          "I made a mistake. Help me understand why."
-        ].map(x=><button className="chat-item" key={x} onClick={()=>setMsg(x)}>{x}</button>)}
-        <div className="voice-mini">
-          <span className={listening?"pulse":""}>●</span>
-          <div><b>{listening?"Listening":"Voice ready"}</b><small>English / Hinglish</small></div>
-        </div>
-      </aside>
+ async function sendAttachment(files:FileList|null){if(!files?.length)return;let text="";let name="";for(const f of Array.from(files)){name+=name?" · ":"";name+=f.name;if(f.type.startsWith("image/")){const b=await new Promise<string>(resolve=>{const r=new FileReader();r.onload=()=>resolve(String(r.result||""));r.readAsDataURL(f)});text+="\\n[IMAGE DATA "+f.name+"] "+b.slice(0,500000)}else if(f.type==="text/plain"){text+="\\n"+(await f.text()).slice(0,30000)}else if(f.name.toLowerCase().endsWith(".pdf")){text+="\\n[PDF ATTACHMENT "+f.name+"] Please analyze the attached study material."} }setMsg(name);await ask("Analyze the attached question/material and guide me as a JEE student.",false,text)}
 
-      <main className="chat-main">
-        <div className="ai-toolbar">
-          <div><span className="status-dot"/> JARVIS AI online</div>
-          <label className="voice-toggle"><input type="checkbox" checked={autoVoice} onChange={e=>setAutoVoice(e.target.checked)}/> Auto voice</label>
-        </div>
+ async function realityCheck(){setBusy(true);try{const x=await api("/api/ai/chat",{method:"POST",body:JSON.stringify({message:"3-Day AI Reality Check. Analyze my last 3 days using actual Todo, Backlog, Error Book and practice evidence. Give achievements, risks, repeated mistakes, plan-vs-execution gap, and tomorrow correction drill. Do not invent missing evidence."})});setReport(x.answer||"");setReportDue(false);await api("/api/module/ai_guru",{method:"PUT",body:JSON.stringify({data:{sessions,current,last_report:x.answer||"",last_report_date:new Date().toISOString()}}))}catch(e:any){setReport(e.message||"Review failed")}finally{setBusy(false)}}
 
-        <div className="chat-scroll">
-          {!history.length&&<div className="ai-welcome">
-            <span className="ai-orb">✦</span>
-            <h2>Talk to JARVIS</h2>
-            <p>Type a doubt or press the microphone. Voice commands can actually update your Todo, Backlog 360 and Error Book.</p>
-            <div className="suggestions">
-              {["JARVIS, add 20 Thermodynamics PYQs to my Todo.","JARVIS, add Circular Motion as high-priority backlog.","JARVIS, save this as a Physics conceptual error."].map(x=><button key={x} onClick={()=>setMsg(x)}>{x}</button>)}
-            </div>
-          </div>}
-          {history.map((m,i)=><div className={"chat-bubble "+m.role} key={i}>
-            <span>{m.role==="user"?"You":"JARVIS"}</span><p>{m.content}</p>
-            {m.role==="assistant"&&<button className="speak-btn" onClick={()=>speak(m.content)}>{speaking?"🔊 Speaking…":"🔊 Speak"}</button>}
-          </div>)}
-          {busy&&<div className="chat-bubble assistant"><span>JARVIS</span><p>Thinking…</p></div>}
-        </div>
-
-        <div className="composer">
-          <textarea value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();ask(msg)}}} placeholder="Ask your AI tutor anything…"/>
-          <div>
-            <button className={listening?"voice-active":"voice-btn"} onClick={startVoice}>{listening?"🔴 Listening…":"🎙 Voice command"}</button>
-            <button className="primary" onClick={()=>ask(msg)} disabled={busy}>{busy?"Thinking…":"Send ↑"}</button>
-          </div>
-          {voiceStatus&&<small className="voice-status">{voiceStatus}</small>}
-        </div>
-      </main>
-    </div>
-  </Gate>
+ const list=Object.entries(sessions).filter(([n,c])=>!search||n.toLowerCase().includes(search.toLowerCase())||c.messages.some(m=>m.content.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>Number(!b[1].pinned)-Number(!a[1].pinned)||(b[1].updated_at||0)-(a[1].updated_at||0));
+ return <Gate title="AI Tutor" subtitle="AI GuRu: JEE mentor + planning + execution + performance diagnosis + voice control.">
+  <div className="ai-layout">
+   <aside className="chat-sidebar"><button className="primary full" onClick={newChat}>＋ New Chat</button><div className="side-label">CHATS</div><input value={search} onChange={e=>setSearch(e.target.value)} placeholder="🔎 Search chats"/>{list.map(([n,c])=><div className="chat-row" key={n}><button className="chat-item" onClick={()=>selectChat(n)}>{c.pinned?"📌 ":""}{n}</button><button className="ghost" onClick={()=>pinChat(n)}>⋮</button></div>)}<div className="side-label">RESPONSE MODE</div><select value={mode} onChange={e=>setMode(e.target.value)}><option>Quick Solve</option><option>Step-by-step Explain</option><option>Deep JEE Analysis</option></select><div className="voice-mini"><span className={listening?"pulse":""}>●</span><div><b>{listening?"Listening":"Voice ready"}</b><small>English / Hinglish</small></div></div></aside>
+   <main className="chat-main"><div className="ai-toolbar"><div><span className="status-dot"/> JARVIS AI online</div><label className="voice-toggle"><input type="checkbox" checked={autoVoice} onChange={e=>setAutoVoice(e.target.checked)}/> Auto voice</label></div>
+    <div className="performance-box"><div><b>📈 JEE Performance Command</b><small>Execution → practice → mistakes → correction</small></div>{reportDue&&<button className="secondary" onClick={realityCheck} disabled={busy}>🧠 Open 3-Day AI Reality Check</button>}{report&&!reportDue&&<button className="ghost" onClick={()=>setReport("")}>Close Review</button>}</div>
+    {report&&<div className="ai-report"><h3>🧠 3-Day AI Performance Review</h3><p>{report}</p></div>}
+    <div className="chat-scroll">{!msgs.length&&<div className="ai-welcome"><span className="ai-orb">✦</span><h2>Talk to JARVIS</h2><p>Ask a doubt, attach material, use voice, or let JARVIS analyze your real execution.</p><div className="suggestions">{["Teach me Thermodynamics from basics.","Analyze my backlog and tell me what to do first.","Explain this JEE question step by step.","I made a mistake. Help me understand why."].map(x=><button key={x} onClick={()=>setMsg(x)}>{x}</button>)}</div></div>}{msgs.map((m,i)=><div className={"chat-bubble "+m.role} key={i}><span>{m.role==="user"?"You":"JARVIS"}</span>{m.attachment&&<small>📎 {m.attachment}</small>}<p>{m.content}</p>{m.role==="assistant"&&<button className="speak-btn" onClick={()=>speak(m.content)}>{speaking?"🔊 Speaking…":"🔊 Speak"}</button>}</div>)}{busy&&<div className="chat-bubble assistant"><span>JARVIS</span><p>Thinking…</p></div>}</div>
+    <div className="composer"><textarea value={msg} onChange={e=>setMsg(e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();ask(msg)}}} placeholder="Ask your AI tutor anything…"/><div><label className="voice-btn">📎 Attach<input hidden type="file" multiple accept="image/*,.pdf,.txt" onChange={e=>sendAttachment(e.target.files)}/></label><button className={listening?"voice-active":"voice-btn"} onClick={startVoice}>{listening?"🔴 Listening…":"🎙 Voice"}</button><button className="primary" onClick={()=>ask(msg)} disabled={busy}>{busy?"Thinking…":"Send ↑"}</button></div>{voiceStatus&&<small className="voice-status">{voiceStatus}</small>}</div>
+   </main>
+  </div>
+ </Gate>
 }
