@@ -86,3 +86,4 @@ export default function Backlog(){
       {analysis&&<div className="ai-report"><h3>JARVIS diagnosis</h3><p>{analysis}</p></div>}
     </Card>}
   </Gate>
+}
